@@ -1,0 +1,28 @@
+services:
+  n8n_app:
+    image: n8nio/n8n:latest
+    container_name: n8n_core_container
+    restart: "no"
+    ports:
+      - "5678:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=postgres
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_DATABASE=n8n_data
+      - DB_POSTGRESDB_USER=postgres
+      - DB_POSTGRESDB_PASSWORD=postgres
+      - N8N_HOST=192.168.1.50
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - NODE_ENV=production
+      - WEBHOOK_URL=http://192.168.1.50:5678/
+      - GENERIC_TIMEZONE=America/Bogota
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+    networks:
+      - shared_db_network
+
+networks:
+  shared_db_network:
+    external: true

@@ -1,0 +1,1432 @@
+{
+  "name": "WorkflowPlanDev",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "create-plan",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        -864,
+        816
+      ],
+      "id": "5fb4d704-8b06-4683-af0c-99c909b68d22",
+      "name": "Webhook",
+      "webhookId": "88342a19-86f3-4def-a261-210d4a735b34"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [
+        1984,
+        704
+      ],
+      "id": "9d96bbfb-5704-4b87-8974-af6fc2db5cb0",
+      "name": "Google Gemini Chat Model",
+      "credentials": {
+        "googlePalmApi": {
+          "id": "ulpONNvcDT5yqFHl",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Webhook').item.json.body.chatInput }}",
+        "options": {
+          "systemMessage": "={{ $('Sytem promt').item.json.system_prompt }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        -32,
+        816
+      ],
+      "id": "47ee36c6-de43-41e2-85b7-aff08c9d6e73",
+      "name": "Create Plan"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Obtenemos el output que contiene el texto con el JSON\nconst rawOutput = $input.first().json.data;\n\ntry {\n    const fullJson = rawOutput;\n    const actions = fullJson.pending_actions || [];\n    const status = fullJson.status;\n    const swagger_definition = fullJson.swagger_definition;\n    const project_overview = fullJson.project_overview;\n    const work_plan = fullJson.work_plan;\n\n    return {\n        status,\n        has_gemini: actions.some(a => [\"[GEMINI]\"].includes(a.tag)),\n        has_human: actions.some(a => [\"[ASK_CRIS]\", \"[SWAGGER_PROPOSAL]\", \"[PROPOSAL]\"].includes(a.tag)),\n        gemini_tasks: actions.filter(a => a.tag === \"[GEMINI]\"),\n        human_tasks: actions.filter(a => a.tag !== \"[GEMINI]\"),\n        swagger_definition,\n        project_overview,\n        work_plan,\n        // Devolvemos el JSON ya procesado para que el resto del flujo lo use fácil\n        data: fullJson\n    };\n} catch (error) {\n    // Si algo falla, te devuelve el error para debuggear en la interfaz de n8n\n    return {\n        status: \"RAW_TEXT_RESPONSE\",\n        has_gemini: false,\n        has_human: true,\n        human_tasks: [{ \n            tag: \"[ASK_CRIS]\", \n            message: \"La IA no generó un JSON, sino un documento técnico. ¿Deseas procesarlo manualmente?\" \n        }],\n        project_overview: { validation_notes: \"0x02 - Non-JSON Payload received\" },\n        raw_text: rawOutput // Aquí capturamos todo el plan que escribió\n    };\n}"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        832
+      ],
+      "id": "6146f34e-39da-459f-bc29-cb42fed65e25",
+      "name": "JS Pending Actions"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('JS Pending Actions').item.json.gemini_tasks[0].message }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        2000,
+        480
+      ],
+      "id": "c038746d-f6a1-446d-8eac-88ffb51e7427",
+      "name": "Search Internet"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO ai_plan_tasks_control (task_plan_id, status, business_context)\nVALUES ('{{ $('Webhook').item.json.body.task_plan_id }}', 'IN_PROGRESS', '{{ $('Webhook').item.json.body.chatInput }}')\nON CONFLICT (task_plan_id) \nDO UPDATE SET status = 'IN_PROGRESS';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -272,
+        816
+      ],
+      "id": "75c8acda-5309-4a51-883a-77cad8a697e9",
+      "name": "Save Work",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"task_plan_id\": \"{{ $('Webhook').item.json.body.task_plan_id }}\",\n  \"status\": \"{{ $('JS Pending Actions').item.json.status }}\",\n  \"project_overview\": {{ JSON.stringify($('JS Pending Actions').item.json.project_overview) }},\n  \"human_tasks\": {{ JSON.stringify($('JS Pending Actions').item.json.human_tasks) }},\n  \"model_response\": {{ JSON.stringify($('Review Json Response').item.json.data) }}\n} ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3184,
+        832
+      ],
+      "id": "e63e2454-1921-42b7-91b3-942fac2e4c91",
+      "name": "Response Cris"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.has_gemini }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "eba8615d-16d4-4e5d-a34e-32bf6f5cc3c6"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Research"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "d4aeec35-584b-4b1d-bddb-11fb8b1a2aab",
+                    "leftValue": "={{ $json.has_human }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Cris Response"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "0c337dd8-99fa-427d-9557-05a11748ce03",
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "READY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Encoding"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "be23a1f7-7a48-409a-938d-808d3755d4c8",
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "READY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "notEquals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Inconsistency"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1600,
+        800
+      ],
+      "id": "0ddc51b2-1b2e-4c0b-ad14-37588c18242c",
+      "name": "If Actions"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('JS Pending Actions').item.json.has_human }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    },
+                    "id": "3f3f77a8-5ddc-4321-9b31-a9721aba98ef"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Cris Response"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "e5524f0e-e53c-4a0d-a59a-eafc1a5eb11c",
+                    "leftValue": "={{ $('JS Pending Actions').item.json.has_gemini }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Research Complete"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "9168fb95-0cbb-41c2-b057-d4d1ee9584d9",
+                    "leftValue": "={{ $('JS Pending Actions').item.json.status }}",
+                    "rightValue": "READY",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Inconsistency"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        2768,
+        112
+      ],
+      "id": "46fd7fc5-302e-4b1c-abdc-2bd9627b0190",
+      "name": "If Pending action cris"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update ai_tasks_control \n\tset attempt_count = attempt_count + 1 \n\twhere task_id = $1",
+        "options": {
+          "queryReplacement": "={{ $('Webhook').item.json.body.task_plan_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -624,
+        16
+      ],
+      "id": "9334837d-bc3d-4b68-9a9f-b86cccb81c39",
+      "name": "Save new Attemps",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.body.task_plan_id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        112,
+        1056
+      ],
+      "id": "f04e3487-5b4e-4e9f-9abb-e5164828e6ac",
+      "name": "Postgres Chat Memory2",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.body.task_plan_id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        2112,
+        704
+      ],
+      "id": "2e287909-2a29-4b04-ac95-4bb9872e0387",
+      "name": "Postgres Chat Memory",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $('Num Attemps').item.json.attempt_count + 1}}",
+                    "rightValue": 4,
+                    "operator": {
+                      "type": "number",
+                      "operation": "gte"
+                    },
+                    "id": "8e2634c5-23be-42da-aa31-6f15ee7eba4f"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Question Cris"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "073535b0-f569-45e3-b3bd-2912e4df60bb",
+                    "leftValue": "={{ $('Num Attemps').item.json.attempt_count + 1}}",
+                    "rightValue": 4,
+                    "operator": {
+                      "type": "number",
+                      "operation": "lt"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Return ai"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -416,
+        16
+      ],
+      "id": "732b982e-b42a-4864-b7cc-6a337c06239e",
+      "name": "Switch"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"task_plan_id\": \"{{ $('Webhook').item.json.body.task_plan_id }}\",\n  \"status\": \"INCONSISTENCY\",\n  \"review_process\": {{ JSON.stringify($('JS Pending Actions').item.json) }},\n  \"model_response\": {{ JSON.stringify($('JS Pending Actions').item.json.data) }}\n}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        80,
+        0
+      ],
+      "id": "194e96c2-3dac-4d74-bf6a-fa82832e3a38",
+      "name": "Response Cris1"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "update ai_tasks_control \n\tset attempt_count = 1\n\twhere task_id = $1",
+        "options": {
+          "queryReplacement": "={{ $('Webhook').item.json.body.task_plan_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -176,
+        0
+      ],
+      "id": "02289636-2229-4175-8617-123511f2ab12",
+      "name": "Reset Attemps",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={\n  \"task_plan_id\": \"{{ $('Webhook').item.json.body.task_plan_id }}\",\n  \"status\": \"{{ $('JS Pending Actions').item.json.status }}\",\n  \"work_plan_execution_id\": \"{{ $('Create Plan1').item.json.id }}\",\n  \"model_response\": {{ JSON.stringify($('JS Pending Actions').item.json.data) }}\n}  ",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        3184,
+        1024
+      ],
+      "id": "366a5673-ce06-4ecb-a0f7-f19a416842e0",
+      "name": "Respond to Webhook"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO work_plan_execution (id_task_plan, output_data, architecture, stack_details, swagger_definition, state)\nVALUES ($1, $2, $3, $4, $5, $6)\nRETURNING id;",
+        "options": {
+          "queryReplacement": "={{ [\n  $node[\"Webhook\"].json.body.task_plan_id, \n  $('JS Pending Actions').item.json.data, \n  $node[\"JS Pending Actions\"].json.data.project_overview.architecture, \n  JSON.stringify($node[\"JS Pending Actions\"].json.data.project_overview.stack_details), \n  $node[\"JS Pending Actions\"].json.data.project_overview.swagger_definition,\n  'PENDING'\n] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2304,
+        1024
+      ],
+      "id": "b37308ba-4565-440c-935c-2f2916c0851b",
+      "name": "Create Plan1",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const masterId = $input.first().json.id;\nconst plan = $('JS Pending Actions').first().json.work_plan;\n\nreturn plan.map(task => {\n    // Forzamos a que depends_on sea SIEMPRE un array válido para Postgres\n    let rawDepends = task.depends_on;\n    let finalDepends = [];\n\n    if (Array.isArray(rawDepends)) {\n        finalDepends = rawDepends;\n    } else if (rawDepends !== null && rawDepends !== undefined && rawDepends !== \"\") {\n        // Si es un número o un string que representa un número, lo metemos en un array\n        finalDepends = [parseInt(rawDepends)];\n    }\n    // Si es null o vacío, se queda como [] (Postgres acepta un array vacío para int[])\n\n    return {\n        work_plan_execution_id: masterId,\n        task_id: task.task_id,\n        task_role: task.task_role,\n        label: task.label,\n        description: task.description,\n        technical_context: task.technical_context,\n        can_parallize: !!task.can_parallelize, // Forzamos booleano\n        depends_on: finalDepends, // n8n lo mapeará correctamente a {1,2,3} en Postgres\n        output_data: 'PENDING'\n    };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2528,
+        1024
+      ],
+      "id": "25453ad8-4db9-470e-b7a8-65ed0a7378d3",
+      "name": "Create tasks plan"
+    },
+    {
+      "parameters": {
+        "operation": "deleteTable",
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "work_plan_execution",
+          "mode": "list",
+          "cachedResultName": "work_plan_execution"
+        },
+        "deleteCommand": "delete",
+        "where": {
+          "values": [
+            {
+              "column": "id_task_plan",
+              "value": "={{ $('Webhook').item.json.body.task_plan_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2064,
+        1024
+      ],
+      "id": "a7899287-4ca1-4e79-8552-5cf2da2afa66",
+      "name": "Delete plans old",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "delete from work_plan_execution_task  where work_plan_execution_id = (select id from work_plan_execution wpe where wpe.id_task_plan = $1)",
+        "options": {
+          "queryReplacement": "={{ $('Webhook').item.json.body.task_plan_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1840,
+        1024
+      ],
+      "id": "b00bd9a6-93c6-42fe-9a84-69b0f8975066",
+      "name": "Delete plans tasks",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "work_plan_execution_task",
+          "mode": "list",
+          "cachedResultName": "work_plan_execution_task"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "can_parallize": "={{ $json.can_parallize }}",
+            "task_id": "={{ $json.task_id }}",
+            "work_plan_execution_id": "={{ $('Create Plan1').item.json.id }}",
+            "label": "={{ $json.label }}",
+            "description": "={{ $json.description }}",
+            "technical_context": "={{ $json.technical_context }}",
+            "output_data": "PENDING",
+            "depends_on": "={{ $json.depends_on }}",
+            "task_role": "={{ $json.task_role }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "id",
+              "displayName": "id",
+              "required": false,
+              "defaultMatch": true,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "task_id",
+              "displayName": "task_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "work_plan_execution_id",
+              "displayName": "work_plan_execution_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "task_role",
+              "displayName": "task_role",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "label",
+              "displayName": "label",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "description",
+              "displayName": "description",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "technical_context",
+              "displayName": "technical_context",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "can_parallize",
+              "displayName": "can_parallize",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "output_data",
+              "displayName": "output_data",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "depends_on",
+              "displayName": "depends_on",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "array",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2768,
+        1024
+      ],
+      "id": "3a64169f-6037-40c1-850a-fe2d92fef23b",
+      "name": "Create plan task",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "google/gemma-4-26b-a4b",
+          "mode": "list",
+          "cachedResultName": "google/gemma-4-26b-a4b"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "timeout": 480000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -48,
+        1056
+      ],
+      "id": "55bdda99-64e1-466e-8d6f-6708a49173c2",
+      "name": "OpenAI Chat Model",
+      "credentials": {
+        "openAiApi": {
+          "id": "7ESHgv2jZ3S5nv5w",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.isValid }}",
+                    "rightValue": false,
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "false",
+                      "singleValue": true
+                    },
+                    "id": "dc39a370-e8bb-4cf2-8af7-9638c1f72ce2"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Not"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "d801e684-2add-4012-bc71-a8893101e4a6",
+                    "leftValue": "={{ $json.isValid }}",
+                    "rightValue": "",
+                    "operator": {
+                      "type": "boolean",
+                      "operation": "true",
+                      "singleValue": true
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Yes"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        832,
+        816
+      ],
+      "id": "60c13d6e-53c9-4fd9-9c43-d182c07de9e2",
+      "name": "Review json response"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "google/gemma-4-26b-a4b",
+          "mode": "list",
+          "cachedResultName": "google/gemma-4-26b-a4b"
+        },
+        "responsesApiEnabled": false,
+        "options": {
+          "timeout": 480000
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        768,
+        384
+      ],
+      "id": "03c186c7-e18f-402c-a518-7794af41c4de",
+      "name": "OpenAI Chat Model1",
+      "credentials": {
+        "openAiApi": {
+          "id": "7ESHgv2jZ3S5nv5w",
+          "name": "OpenAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={\n  ¨isValid\": ¨{{ $('Review Json Response').item.json.isValid }}¨,\n  ¨error_type¨: ¨{{ $('Review Json Response').item.json.error_type }}¨,\n  ¨error_message¨: ¨{{ $('Review Json Response').item.json.error_message }}¨.\n  ¨details¨: {{ $('Review Json Response').item.json.error_message }},\n  ¨parsed_data¨: {{ $('Review Json Response').item.json.parsed_data }}\n}",
+        "options": {
+          "systemMessage": "={{ $('Sytem promt').item.json.system_prompt }}"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        768,
+        528
+      ],
+      "id": "fb377207-1470-41e8-b047-791a26bf94f6",
+      "name": "Create Plan With Errors"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. Obtenemos el texto crudo del nodo anterior\nlet rawInput = $input.first().json.output;\n\n// 1) Elimina bloques completos de \"pensamiento\" del modelo distill\n//    Forma:  <|channel>thought ... texto ... <channel|>\n//    Usamos [\\s\\S] porque el bloque suele tener saltos de línea.\nrawInput = rawInput.replace(/<\\|channel>[\\s\\S]*?<channel\\|>/g, \"\");\n\n// 2) Por si queda algún token suelto sin su pareja (respuestas truncadas)\nrawInput = rawInput.replace(/<\\|channel>/g, \"\");\nrawInput = rawInput.replace(/<channel\\|>/g, \"\");\n\n// 3) Limpia también tokens Harmony estándar por si el modelo mezcla formatos\nrawInput = rawInput.replace(/<\\|[a-z_]+\\|>/gi, \"\");\n\n// 4) Etiquetas de canal sueltas al inicio (\"thought\", \"analysis\", \"final\", \"commentary\")\nrawInput = rawInput.replace(/^\\s*(thought|analysis|final|commentary)\\s*\\n/i, \"\");\n\nrawInput = rawInput.trim();\n\n// 2. Función \"anti-terquedad\" con RegExp seguro para editores visuales\n// Usamos `{3} para buscar las 3 comillas invertidas sin romper el markdown\nfunction extractAndParseJSON(text) {\n    // 1) Probar bloque ```json ... ```\n    const fenceMatch = text.match(/`{3}(?:json)?\\s*([\\s\\S]*?)\\s*`{3}/);\n    if (fenceMatch && fenceMatch[1]) {\n        try { return JSON.parse(fenceMatch[1]); } catch(e) {}\n    }\n    // 2) Probar texto tal cual\n    try { return JSON.parse(text.trim()); } catch(e) {}\n    // 3) Fallback: extraer desde el primer { hasta el último } balanceado\n    const firstBrace = text.indexOf('{');\n    const lastBrace = text.lastIndexOf('}');\n    if (firstBrace !== -1 && lastBrace > firstBrace) {\n        try { return JSON.parse(text.substring(firstBrace, lastBrace + 1)); } catch(e) {}\n    }\n    return null;\n}\n\n// 3. El Validador Estricto (Tu Tech Lead automatizado)\nfunction validateSchema(data) {\n    const errors = [];\n\n    // --- 1. Validar Status ---\n    const validStatuses = [\"READY\", \"MISSING_SWAGGER\", \"UNDER_INQUIRY\", \"PROPOSE_TO_CRIS\", \"ASK_CRIS\"];\n    if (!validStatuses.includes(data.status)) {\n        errors.push(`Invalid 'status'. Received: ${data.status}`);\n    }\n\n    // --- 2. Validar Project Overview ---\n    const po = data.project_overview;\n    if (!po || typeof po !== 'object') {\n        errors.push(\"'project_overview' is missing or it is not an object.\");\n    } else {\n        if (typeof po.architecture !== 'string') errors.push(\"'project_overview.architecture' must be string.\");\n        if (typeof po.swagger_definition !== 'string') errors.push(\"'project_overview.swagger_definition' must be string.\");\n        if (typeof po.validation_notes !== 'string') errors.push(\"'project_overview.validation_notes' must be string.\");\n        \n        const stack = po.stack_details;\n        if (!stack || typeof stack !== 'object') {\n            errors.push(\"'stack_details' is missing or it is not an object.\");\n        } else {\n            if (typeof stack.backend !== 'string') errors.push(\"'stack_details.backend' must be string.\");\n            if (typeof stack.frontend !== 'string') errors.push(\"'stack_details.frontend' must be string.\");\n            if (typeof stack.database !== 'string') errors.push(\"'stack_details.database' must be string.\");\n            if (!Array.isArray(stack.others)) errors.push(\"'stack_details.others' It must be an array.\");\n        }\n    }\n\n    // --- 3. Validar Work Plan ---\n    if (!Array.isArray(data.work_plan)) {\n        errors.push(\"'work_plan' It must be an array.\");\n    } else {\n        const validRoles = [\"THINKING_TASK\", \"EXECUTION_TASK\", \"VALIDATION_TASK\"];\n        const validLabels = [\"[PC_BIG]\", \"[PORTABLE]\", \"[GEMINI]\", \"[CLAUDE]\"];\n        \n        data.work_plan.forEach((task, index) => {\n            const taskPath = `work_plan[${index}]`;\n            if (typeof task.task_id !== 'number') errors.push(`${taskPath}.task_id must be number.`);\n            if (!validRoles.includes(task.task_role)) errors.push(`${taskPath}.task_role invalid: ${task.task_role}`);\n            if (!validLabels.includes(task.label)) errors.push(`${taskPath}.label invalid: ${task.label}`);\n            \n            // Validaciones duales (Inglés / Español)\n            if (typeof task.description !== 'string') errors.push(`${taskPath}.description must be string.`);\n            if (typeof task.description_spanish !== 'string') errors.push(`${taskPath}.description_spanish must be string.`);\n            if (typeof task.technical_context !== 'string') errors.push(`${taskPath}.technical_context must be string.`);\n            if (typeof task.technical_context_spanish !== 'string') errors.push(`${taskPath}.technical_context_spanish must be string.`);\n            \n            if (typeof task.can_parallelize !== 'boolean') errors.push(`${taskPath}.can_parallelize must be boolean.`);\n            if (typeof task.estimated_hours !== 'number') errors.push(`${taskPath}.estimated_hours must be number.`);\n            \n            // Validación de depends_on (Array de números o null)\n            if (task.depends_on !== null) {\n                if (!Array.isArray(task.depends_on) || !task.depends_on.every(d => typeof d === 'number')) {\n                    errors.push(`${taskPath}.depends_on must be an array of numbers or null.`);\n                }\n            }\n        });\n    }\n\n    // --- 4. Validar Pending Actions ---\n    if (!Array.isArray(data.pending_actions)) {\n        errors.push(\"'pending_actions' It must be an array.\");\n    } else {\n        const validTags = [\"[ASK_CRIS]\", \"[GEMINI]\", \"[PROPOSAL]\", \"[SWAGGER_PROPOSAL]\"];\n        data.pending_actions.forEach((action, index) => {\n            const actionPath = `pending_actions[${index}]`;\n            if (!validTags.includes(action.tag)) errors.push(`${actionPath}.tag invalid: ${action.tag}`);\n            if (typeof action.message !== 'string') errors.push(`${actionPath}.message must be string.`);\n        });\n    }\n\n    return errors;\n}\n\n// 4. Ejecución principal\nconst parsedData = extractAndParseJSON(rawInput);\n\nif (!parsedData) {\n    return {\n        isValid: false,\n        error_type: \"PARSE_ERROR\",\n        error_message: \"The response sent did not comply with your system prompt structure. Review the errors found and send the response again. Remember to always respect your system prompt and the structure of the response JSON.\",\n        details: null,\n        parsed_data: rawInput\n    };\n}\n\nconst validationErrors = validateSchema(parsedData);\n\nif (validationErrors.length > 0) {\n    return {\n        isValid: false,\n        error_type: \"SCHEMA_ERROR\",\n        error_message: \"The JSON was parsed, but it breaks the rules of the system prompt contract.\",\n        details: validationErrors,\n        parsed_data: parsedData\n    };\n}\n\n// 5. ¡Paso a producción!\nreturn {\n    isValid: true,\n    data: parsedData\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        816
+      ],
+      "id": "2411afc6-8138-4564-bc8d-bd2517a13c62",
+      "name": "Review Json Response"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "ai_plan_tasks_control",
+          "mode": "list",
+          "cachedResultName": "ai_plan_tasks_control"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "task_plan_id": "={{ $('Webhook').item.json.body.task_plan_id }}",
+            "research_context": "={{ $json.output }}"
+          },
+          "matchingColumns": [
+            "task_plan_id"
+          ],
+          "schema": [
+            {
+              "id": "task_plan_id",
+              "displayName": "task_plan_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "last_error_hash",
+              "displayName": "last_error_hash",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "all_errors_history",
+              "displayName": "all_errors_history",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "array",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "business_context",
+              "displayName": "business_context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "research_context",
+              "displayName": "research_context",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "attempt_count",
+              "displayName": "attempt_count",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "status",
+              "displayName": "status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2528,
+        128
+      ],
+      "id": "7d84742c-2e06-4fff-9fec-5882ec10696d",
+      "name": "Update rows in a table",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "ec0cf934-c8d8-4da3-9d52-1d80055b23e4",
+              "name": "system_prompt",
+              "value": "You are the Lead Architecture Analyst. Your ONLY purpose is to output a single, perfectly formatted JSON object.  ### CRITICAL RULES: 1. **OUTPUT STRICTLY JSON.** No conversational filler. Start immediately with `{` and end with `}`. 2. **NO MARKDOWN.** DO NOT use ```json code blocks. The response must be raw text. 3. DO NOT generate source code unless it is inside the 'technical_context' string. 4. Swagger definitions must be YAML format inside the 'swagger_definition' string field.  ### STATUS CONTRACT & PENDING ACTIONS (MANDATORY): The `status` field and the `pending_actions` array are STRICTLY LINKED. - **IF READY:** `pending_actions` MUST BE `[]`. DO NOT invent proposals, suggestions, or follow-ups. STOP thinking and emit an empty array. - **IF MISSING_SWAGGER:** `pending_actions` must contain object with tag `[SWAGGER_PROPOSAL]`. - **IF UNDER_INQUIRY:** `pending_actions` must contain object with tag `[GEMINI]`. - **IF PROPOSE_TO_CRIS:** `pending_actions` must contain object with tag `[PROPOSAL]`. - **IF ASK_CRIS:** `pending_actions` must contain object with tag `[ASK_CRIS]`.  *(Pending Action Object Format: {\"tag\": \"[TAG]\", \"message\": \"string\"})*  ### LANGUAGE RULES (STRICT): - **ENGLISH ONLY:** For AI consumption. Use English for `architecture`, `stack_details`, `description`, `technical_context`, and `message` when the tag is [GEMINI]. - **SPANISH ONLY:** For Cris (Human) consumption. Use Spanish for `validation_notes`, `description_spanish`, `technical_context_spanish`, and `message` when the tag is [ASK_CRIS], [PROPOSAL], or [SWAGGER_PROPOSAL].  ### HARDWARE & ROUTING RULES: - [PC_BIG]: Assign to THINKING_TASK (architecture/planning) and VALIDATION_TASK (final review). - [PORTABLE]: Assign to EXECUTION_TASK (CRUD, mappings, UI, mechanical work). - [GEMINI]: Assign to research unknown tech versions or documentations. - [CLAUDE]: Always assign as the final VALIDATION_TASK for code audit.  ### JSON SCHEMA: {   \"status\": \"READY | MISSING_SWAGGER | UNDER_INQUIRY | PROPOSE_TO_CRIS | ASK_CRIS\",   \"project_overview\": {     \"architecture\": \"string (English)\",     \"stack_details\": {       \"backend\": \"string\",       \"frontend\": \"string\",       \"database\": \"string\",       \"others\": [\"string\"]     },     \"swagger_definition\": \"string (YAML format)\",     \"validation_notes\": \"string (Spanish. Use Hex: 0x01 Complex, 0x02 Conflict, 0x03 Validated)\"   },   \"work_plan\": [     {       \"task_id\": number,       \"task_role\": \"THINKING_TASK | EXECUTION_TASK | VALIDATION_TASK\",       \"label\": \"[PC_BIG] | [PORTABLE] | [GEMINI] | [CLAUDE]\",       \"description\": \"string (English)\",       \"description_spanish\": \"string (Spanish)\",       \"technical_context\": \"string (English)\",       \"technical_context_spanish\": \"string (Spanish)\",       \"depends_on\": [number] | null,       \"can_parallelize\": boolean,       \"estimated_hours\": number     }   ],   \"pending_actions\": [] }  --- **[END OF INSTRUCTIONS]** --- *Start generating the JSON immediately after this line.*",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -480,
+        816
+      ],
+      "id": "c7b977f5-9771-47e6-9964-284f6c0ce259",
+      "name": "Sytem promt"
+    },
+    {
+      "parameters": {
+        "sessionIdType": "customKey",
+        "sessionKey": "={{ $('Webhook').item.json.body.task_plan_id }}"
+      },
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.3,
+      "position": [
+        928,
+        368
+      ],
+      "id": "c541fd1a-a6f1-4eca-951d-c44518c8ea47",
+      "name": "Postgres Chat Memory3",
+      "credentials": {
+        "postgres": {
+          "id": "F4rbo8FOeONLqH5w",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Sytem promt",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Search Internet",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Plan": {
+      "main": [
+        [
+          {
+            "node": "Review Json Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JS Pending Actions": {
+      "main": [
+        [
+          {
+            "node": "If Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Work": {
+      "main": [
+        [
+          {
+            "node": "Create Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search Internet": {
+      "main": [
+        [
+          {
+            "node": "Update rows in a table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Actions": {
+      "main": [
+        [
+          {
+            "node": "Search Internet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Response Cris",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Delete plans tasks",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save new Attemps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If Pending action cris": {
+      "main": [
+        [
+          {
+            "node": "Response Cris",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Plan",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save new Attemps",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save new Attemps": {
+      "main": [
+        [
+          {
+            "node": "Switch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory2": {
+      "ai_memory": [
+        [
+          {
+            "node": "Create Plan",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Search Internet",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch": {
+      "main": [
+        [
+          {
+            "node": "Reset Attemps",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create Plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset Attemps": {
+      "main": [
+        [
+          {
+            "node": "Response Cris1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Plan1": {
+      "main": [
+        [
+          {
+            "node": "Create tasks plan",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete plans old": {
+      "main": [
+        [
+          {
+            "node": "Create Plan1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create tasks plan": {
+      "main": [
+        [
+          {
+            "node": "Create plan task",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Delete plans tasks": {
+      "main": [
+        [
+          {
+            "node": "Delete plans old",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create plan task": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Create Plan",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review json response": {
+      "main": [
+        [
+          {
+            "node": "Create Plan With Errors",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "JS Pending Actions",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "OpenAI Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Create Plan With Errors",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Plan With Errors": {
+      "main": [
+        [
+          {
+            "node": "Review Json Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Review Json Response": {
+      "main": [
+        [
+          {
+            "node": "Review json response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update rows in a table": {
+      "main": [
+        [
+          {
+            "node": "If Pending action cris",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sytem promt": {
+      "main": [
+        [
+          {
+            "node": "Save Work",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory3": {
+      "ai_memory": [
+        [
+          {
+            "node": "Create Plan With Errors",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "e4c2a71e-230f-4259-8363-2a7ddc842440",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "c000d0a8c2fc87421748e085d277f7183e4de6497ba24590b6f9cc82f752b24e"
+  },
+  "id": "ip14TnaZhJsyYSv6",
+  "tags": []
+}
